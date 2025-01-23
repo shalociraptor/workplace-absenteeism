@@ -1,0 +1,332 @@
+---
+title: "Predicting Workplace Absenteeism in Brazil: Insights from Employee Behavior and Productivity Data"
+author: "Shalini Singh and Upashana Suresh Kumar"
+date: "2024-12-13"
+output: 
+  pdf_document: 
+    number_sections: true
+number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(caret)
+library(knitr) 
+library(pROC) 
+library(tibble)
+```
+
+``` {r echo=FALSE, include=FALSE}
+absent.df <- read.csv("Absenteeism_at_work.csv",head = TRUE, sep=";")
+
+#changing categorical variables
+absent.df$Seasons <- factor(absent.df$Seasons, levels = c(1, 2, 3, 4), labels = c("Winter", "Spring", "Summer", "Fall"))
+absent.df$Education <- factor(absent.df$Education, levels = c(1, 2, 3, 4), labels = c("High School", "Graduate", "Postgraduate", "Master/Doctor"))
+absent.df$Social.drinker <- factor(absent.df$Social.drinker, levels = c(0, 1), labels = c("No", "Yes"))
+absent.df$Social.smoker <- factor(absent.df$Social.smoker, levels = c(0, 1), labels = c("No", "Yes"))
+absent.df$Day.of.the.week <- factor(absent.df$Day.of.the.week, levels = c(2, 3, 4, 5, 6), labels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"))
+absent.df$Month.of.absence <- factor(absent.df$Month.of.absence, levels = 0:12, labels = c("N/A", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"))
+absent.df$Reason.for.absence <- factor(absent.df$Reason.for.absence)
+
+absent.df <- absent.df[,-12]
+```
+
+# Introduction
+
+## Project Description and Domain 
+
+This dataset is relevant to the field of Data Analytics, specifically in the Human Resources field. It has been used in academic research at the Universidade Nove de Julho - Postgraduate Program in Informatics and Knowledge Management in Brazil. For this project, we are analyzing the dataset to understand and predict patterns of workplace absenteeism, focusing on employee behavior, productivity, and factors that affect absenteeism. Our primary question of interest is: What are the key factors that influence workplace absenteeism? To delve deeper, we examine a sub-question: How do health conditions and demographic factors contribute to absenteeism? 
+
+## Overview of Analysis 
+
+The data was analyzed through linear regression and KNN (K-nearest neighbors), both using cross-validation. The focus of this analysis is the outcome variable in the dataset: absenteeism time in hours.
+
+For the linear regression model, cross-validation was used, and the model was manually refined by selecting the three most significant predictors. These predictors were determined using the varImp function, which ranks predictors by their importance in the model. In the case of linear regression, varImp evaluates importance based on absolute value of the t-statistic of each variable.
+
+Similarly, the KNN model was chosen through cross-validation and the use of the varImp function. For KNN, varImp assesses importance based on each predictor's contribution to model accuracy and its role in distinguishing neighbors when predicting the outcome. The optimal K-value for the KNN model with the significant predictors was found to be K = 15, balancing model complexity and predictive performance.
+
+By applying the varImp function to both linear regression and KNN, we ensured that the selection of predictors and model parameters was statistically driven, optimizing the models for predicting absenteeism time in hours.
+
+## Dataset Description 
+The dataset, sourced from a courier company in Brazil, comprises 20 variables and 740 observations collected between July 2007 and July 2010. It includes both numeric and categorical data types. Demographic variables such as age, sex, and BMI are complemented by behavioral variables like drinking, smoking, along with contextual variables such as seasons, month of absence, and transportation expenses.
+
+The outcome variable, absenteeism time, is numeric and measured in hours, with values ranging from 0 to 120. The summary statistics are displayed below:
+
+```{r echo=FALSE}
+sum.labels <- c("Min.", "1st Qu.", "Median", "Mean", "3rd Qu.", "Max.")
+sum.data <- c("0.00", "2.00", "3.00", "6.294", "8.00", "120.00")
+sum.df <- data.frame(sum.labels, sum.data)
+kable(sum.df, col.names=c("Stats", "Values"), caption='Summary Statistics for Absenteeism Time')
+```
+
+
+Notably, the dataset contained no missing values or obvious outliers, ensuring our data was well-suited for analysis. The dataset contained a disciplinary failure column which we did not include in our analysis. This is due to observed collinearity between the disciplinary failure and reason for absence predictors. Every instance of 1 for disciplinary failure correlates to a 0 value for reason for absence. We also omitted the ID column in our analysis. 
+
+The categorical variables in the dataset include season (levels: 1 = Winter, 2 = Spring, 3 = Summer, 4 = Fall), education (levels: 1 = High School, 2 = Graduate, 3 = Postgraduate, 4 = master and doctor), social drinker (levels: 0 = No, 1 = Yes), social smoker (levels: 0 = No, 1 = Yes), day of the week (levels: 2 = Monday, 3 = Tuesday, 4 = Wednesday, 5 = Thursday, 6 = Friday), month of absence (1 = January, 2 = February, 3 = March, 4 = April, 5 = May, 6 = June, 7 = July, 8 = August, 9 = September, 10 = October, 11 = November, 12 = December), ID (levels: 1 to 36), reason for absence (levels: 0 to 28) where each level correlates to a medical issue, which can be found in table 2 below. 
+
+``` {r echo=FALSE, include=TRUE, fig}
+levels.vars <- c("0", "1", "2", "3", "4", "5", "6", "7", "8", 
+                   "9", "10", "11", "12", "13", "14", "15", "16", 
+                   "17", "18", "19", "20", "21", "22 to 28")
+
+medic.vars <- c("None", 
+                        "Certain infectious and parasitic diseases", 
+                        "Neoplasms", 
+                        "Diseases of the blood and blood-forming organs and certain disorders involving the immune mechanism", 
+                        "Endocrine, nutritional and metabolic diseases", 
+                        "Mental and behavioral disorders", 
+                        "Diseases of the nervous system", 
+                        "Diseases of the eye and adnexa", 
+                        "Diseases of the ear and mastoid process", 
+                        "Diseases of the circulatory system", 
+                        "Diseases of the respiratory system", 
+                        "Diseases of the digestive system", 
+                        "Diseases of the skin and subcutaneous tissue", 
+                        "Diseases of the musculoskeletal system and connective tissue", 
+                        "Diseases of the genitourinary system", 
+                        "Pregnancy, childbirth and the puerperium", 
+                        "Certain conditions originating in the perinatal period", 
+                        "Congenital malformations, deformations and chromosomal abnormalities", 
+                        "Symptoms, signs and abnormal clinical and laboratory findings, not elsewhere classified", 
+                        "Injury, poisoning and certain other consequences of external causes", 
+                        "External causes of morbidity and mortality", 
+                        "Factors influencing health status and contact with health services", 
+                        "Unknown")
+
+absence_res<- data.frame(levels.vars, medic.vars )
+kable(absence_res, col.names=c("Levels", "Medical Reasons"), caption='Reason For Absence')
+```
+
+The remaining variables are numeric, including age (ranging from 27 to 58), weight (ranging from 56 to 108 kg), height (ranging from 163 to 196 cm), transportation expense (ranging from 118 to 388), distance from residence to work (ranging from 5 to 52), service time (ranging from 1 to 29), work load average day (ranging from 205.9 to 378.9), hit target (ranging from 81 to 100), son (ranging from 0 to 4), pet (ranging from 0 to 8), and body mass index (ranging from 19 to 38). 
+
+Upon initial analysis, we identified reason for absence as a key variable of interest in relation to absenteeism time in hours. Below are the corresponding plots and descriptive statistics for this variable, as well as a plot illustrating the distribution of absenteeism time by employee ID.
+
+The plots reveal important patterns in absenteeism, highlighting key areas of interest. For instance, the Reason for Absence plot indicates that absenteeism is significantly higher among employees with certain health issues. The second plot identifies specific employees who took more days off, providing valuable insights into individual absenteeism trends. (see Figure 1 and Figure 2)
+
+``` {r echo=FALSE, include=TRUE, fig.cap="Absenteeism Time Categorized by Reason for Absence", fig.height = 2.5, fig.width = 5}
+plot(absent.df$Reason.for.absence, absent.df$Absenteeism.time.in.hours, 
+     xlab = "Reason for Absence", 
+     ylab = "Absentee Time (Hours)")
+```
+
+``` {r echo=FALSE, include=TRUE, fig.cap="Absenteeism Time Categorized by Employee ID", fig.height = 2.5, fig.width = 5}
+plot(absent.df$ID, absent.df$Absenteeism.time.in.hours, 
+     xlab = "Employee ID", 
+     ylab = "Absentee Time (Hours)")
+```
+
+\newpage 
+
+# Model 1: Fitting Linear Regression with Cross Validation 
+
+We fitted a Linear Regression model, incorporating all variables as predictors to predict absenteeism time in hours. We applied 10-fold cross-validation. 
+
+## Linear Regression Model Fit With All Predictors
+
+```{r echo=FALSE, include=FALSE}
+RNGversion("4.3.2")
+set.seed(123456)
+
+index.train <- createDataPartition(y = absent.df$Absenteeism.time.in.hours, p = 0.75, list = FALSE)
+train.set <- absent.df[index.train,]
+test.set <- absent.df[-index.train,]
+```
+
+```{r echo=FALSE, include=FALSE}
+RNGversion("4.3.2")
+set.seed(123456)
+
+train.control <- trainControl(method = "cv", number = 10) 
+ 
+fit.all <- train(Absenteeism.time.in.hours ~ ., 
+                    data = absent.df,
+                    method = "lm",
+                    trControl = train.control)
+```
+
+```{r echo=FALSE}
+lm.imp <- varImp(fit.all)
+df.lm.imp <- lm.imp$importance
+ndf <- rownames_to_column(df.lm.imp, var="Predictor")
+fdf <- cbind(ndf[1], ndf[2])
+colnames(fdf)[2] <- "Overall"
+
+df.lm.imp <- fdf[order(fdf$Overall, decreasing = TRUE), ]
+kable(df.lm.imp, row.names = FALSE, caption='Relative Importance of Predictors for Linear Regression Model.')
+```
+
+The three most significant predictors are reason for absence, education, and age. These are the variables we included in our next model. We omitted the ID predictor in our analysis.
+
+```{r echo=FALSE, fig.align='center', fig.cap= "RMSE of Linear Regression Model Using All Predictors Through Cross Validation", fig.height = 3, fig.width = 5}
+num.folds <- 10
+rmse.all <- fit.all$resample$RMSE
+plot(rmse.all, 
+     xlab = "Fold",
+     xaxp = c(1, num.folds, num.folds-1), 
+     ylab = "RMSE", 
+     ylim=c(min(rmse.all), max(rmse.all)), 
+     col = "red", 
+     type = "b", 
+     pch = 19,   
+     lty = 1) 
+
+text(fit.all$resample$RMSE, labels = fit.all$resample$RMSE, pos = 3, cex = 0.3)
+```
+
+The manual model has the lowest RMSE at fold 6 at 7.610852, making it the optimal fold. The overall performance of the folds is poor, aside from folds 5 and 6. 
+
+\newpage 
+
+## Linear Regression Model Fit With Significant Predictors:
+
+We fitted a Linear Regression model, incorporating reason for absence, education, and age as predictors to predict absenteeism time in hours. We applied 10-fold cross-validation. 
+
+``` {r, echo=FALSE, include=FALSE}
+RNGversion("4.3.2")
+set.seed(123456)
+
+train.control <- trainControl(method = "cv", number = 10) 
+ 
+model.manual <- train(Absenteeism.time.in.hours ~ Reason.for.absence + Education + Age, 
+                    data = absent.df,
+                    method = "lm",
+                    trControl = train.control)
+```
+
+```{r echo=FALSE, fig.align='center', fig.cap= "RMSE Linear Regression Model Using Significant Predictors Through Cross Validation", fig.height = 3, fig.width = 5}
+num.folds <- 10
+rmse.manual <- model.manual$resample$RMSE
+plot(model.manual$resample$RMSE, 
+     xlab = "Fold",
+     xaxp = c(1, num.folds, num.folds-1), 
+     ylab = "RMSE", 
+     ylim=c(min(rmse.manual), max(rmse.manual)), 
+     col = "red", 
+     type = "b", 
+     pch = 19,   
+     lty = 1) 
+
+text(model.manual$resample$RMSE, labels = model.manual$resample$RMSE, pos = 3, cex = 0.3)
+```
+
+The manual model has the lowest RMSE at fold 5 at 6.758879, making it the optimal fold. The overall performance of the folds is poor, aside from folds 5 and 6. 
+
+```{r echo=FALSE, include=FALSE}
+manual.pred <- predict(model.manual, test.set)
+manual.rmse <- sqrt(mean((manual.pred-test.set$Absenteeism.time.in.hours) ^2))
+```
+
+The predictions from this model result in an RMSE of 6.190467. 
+
+## Evaluating the Linear Regression Model
+
+After predicting the fitted model on the reserved test data set, the RMSE is 6.190467. Reason for absence 9 (Diseases of the circulatory system), 2 (Neoplasms), and 12 (Diseases of the skin and subcutaneous tissue) are the most impactful predictors within this model, indicating that reason for absence is extremely significant to the outcome variable. Health conditions have a far-reaching impact on quality of life, so a correlation to absentee time makes sense. 
+
+The original model fit with all predictors has and RMSE of 7.610852 at the optimal fold, compared to our manually fitted model, which has an RMSE of 6.758879. This indicates that our fitted model is better suited to the data, signifying that the predictors we chose are significant. 
+
+\newpage 
+
+# Model 2: KNN with Cross Validation 
+
+## KNN Model Fit With All Predictors:
+
+We fitted a KNN model, incorporating all variables as predictors to predict absenteeism time in hours. We applied 10-fold cross-validation, repeated 3 times. 
+
+```{r echo=FALSE}
+RNGversion("4.3.2")
+set.seed(123456)
+
+ctrl <- trainControl(method="repeatedcv", number=10, repeats = 3)
+knn.mod1 <- train(Absenteeism.time.in.hours ~ ., data = train.set, method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+```
+
+``` {r, echo=FALSE}
+knn.imp <- varImp(knn.mod1)
+df.knn.imp <- knn.imp$importance
+ndf <- rownames_to_column(df.knn.imp, var="Predictor")
+fdf <- cbind(ndf[1], ndf[2])
+colnames(fdf)[2] <- "Overall"
+
+df.knn.imp <- fdf[order(fdf$Overall, decreasing = TRUE), ]
+kable(df.knn.imp, row.names = FALSE, caption='Relative Importance of Predictors for KNN Model.')
+```
+
+The top three predictors by variable importance are: reason for absence, height, and day of the week. These are the variables included in our manual model.
+
+``` {r echo=FALSE, fig.align='center', fig.cap= "RMSE of KNN Model With Significant Predictors (Through Cross Validation)", fig.height = 2.5, fig.width = 5}
+plot(knn.mod1, 
+     xlab = "Neighbors", 
+     ylab = "RMSE", 
+     col = "blue", 
+     type = "b", 
+     pch = 19,   
+     lty = 1)
+```
+
+The optimal value of K chosen by the model is K = 17. The RMSE for the optimal value of K is 13.52974.  
+
+\newpage 
+
+## KNN Model Fit With Significant Predictors:
+
+We fitted a KNN model, incorporating reason for absence, height, and day of the week as predictors to predict absenteeism time in hours. We applied 10-fold cross-validation, repeated 3 times. 
+
+``` {r, echo=FALSE, include=FALSE}
+knn.mod2 <- train(Absenteeism.time.in.hours ~ Reason.for.absence + Height + Day.of.the.week, data = train.set, method = "knn", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+```
+
+``` {r echo=FALSE, fig.align='center', fig.cap= "RMSE of KNN Model With Significant Predictors (Through Cross Validation)", fig.height = 3, fig.width = 5}
+plot(knn.mod2, 
+     xlab = "Neighbors", 
+     ylab = "RMSE", 
+     col = "blue", 
+     type = "b", 
+     pch = 19,   
+     lty = 1)
+```
+
+The optimal value of K chosen by the model is K = 15, with an RMSE of 13.04544.  
+
+```{r echo=FALSE, include=FALSE}
+knn.pred <- predict(knn.mod2, test.set)
+knn.rmse <- sqrt(mean((knn.pred-test.set$Absenteeism.time.in.hours) ^2))
+```
+
+The predictions from this model result in an RMSE of 6.756024. 
+
+## Evaluating the KNN Model
+
+After predicting the fitted model on the reserved test data set, the RMSE is 6.756024. Originally, the fitted model had an RMSE of 13.04544 at the optimal k-value, compared to 13.52974 from the model built with all predictors. This indicates that the second model is fit better to the data, through eliminating less significant predictors. 
+
+\newpage 
+
+# Comparing Models 
+
+```{r echo=FALSE}
+lm.kbl <- manual.rmse
+knn.kbl <- knn.rmse
+kbl.df <- data.frame(lm.kbl, knn.kbl)
+kable(kbl.df, col.names=c("Linear Regression", "KNN"), caption='Predictive RMSEs of Both Models.')
+```
+
+The predictive abilities of the linear regression model are better than the KNN model, making it a more suitable choice. 
+
+# Conclusion
+
+The models applied in this analysis—linear regression and K-Nearest Neighbors (KNN), both using cross-validation—provided valuable insights into the factors influencing absenteeism at work. 
+
+The linear regression model identified significant relationships between absenteeism and predictors such as "Reason for Absence," "Education," and "Age," with a Root Mean Squared Error (RMSE) value of 6.758879 at the optimal fold, indicating a moderate fit. Specifically, the model revealed that Reason for Absence 9—diseases of the circulatory system—had the strongest positive association with absenteeism, underscoring its critical impact. Employees with circulatory system-related conditions are significantly more likely to take leaves, which may be due to the chronic or severe nature of these illnesses that require medical attention or recovery.
+
+The K-Nearest Neighbors (KNN) also identified significant relationships between absenteeism and predictors such as "Reason for Absence," "Height," and "Day of the Week," with a Root Mean Squared Error (RMSE) value of 13.04544 at the optimal k-value, indicating a relatively weaker fit compared to the linear regression model. The model specifically identified a unexpected predictor: height. This can reflect underlying correlations with health or demographic factors that are not directly captured in the dataset. This result showcases the KNN model's strength in identifying less obvious relationships within the data. However, the higher RMSE indicates that its predictions are less dependable compared to the linear regression model.
+
+The predictive capabilities of these models are fairly similar, at 6.190467 for the linear regression model and 6.756024 for the KNN model, but the linear regression model is more accurate in predicting the outcome variable on a held-out test set. 
+
+Overall, the analysis demonstrates that health-related factors, particularly circulatory system diseases, are critical drivers of absenteeism. Absenteeism varies across different employees based on health-related factors, such as chronic conditions like circulatory system diseases, which have a significant positive impact. Other variables, like education, age, and even unexpected factors like height, also influence absenteeism, though their effects can vary in strength depending on the model used for prediction. While the linear regression model provides insights into these relationships, the KNN model highlights additional factors like height and contextual variables, offering a new perspective. 
+
+# References 
+
+[1] DATA SET: Absenteeism at Work - UC Irvine Machine Learning Repository:(https://archive.ics.uci.edu/dataset/445/absenteeism+at+work)
+
